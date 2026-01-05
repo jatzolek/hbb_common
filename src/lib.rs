@@ -57,8 +57,20 @@ pub use toml;
 pub use uuid;
 pub mod fingerprint;
 pub use flexi_logger;
+pub mod stream;
+pub mod websocket;
+#[cfg(feature = "webrtc")]
+pub mod webrtc;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub use rustls_platform_verifier;
+pub use stream::Stream;
+pub use whoami;
+pub mod tls;
+pub mod verifier;
+pub use async_recursion;
+#[cfg(target_os = "linux")]
+pub use users;
 
-pub type Stream = tcp::FramedStream;
 pub type SessionID = uuid::Uuid;
 
 #[inline]
@@ -240,7 +252,7 @@ where
 }
 
 pub fn is_valid_custom_id(id: &str) -> bool {
-    regex::Regex::new(r"^[a-zA-Z]\w{5,15}$")
+    regex::Regex::new(r"^[a-zA-Z][\w-]{5,15}$")
         .unwrap()
         .is_match(id)
 }
@@ -362,7 +374,7 @@ pub fn init_log(_is_async: bool, _name: &str) -> Option<flexi_logger::LoggerHand
         #[cfg(debug_assertions)]
         {
             use env_logger::*;
-            init_from_env(Env::default().filter_or(DEFAULT_FILTER_ENV, "info"));
+            init_from_env(Env::default().filter_or(DEFAULT_FILTER_ENV, "info,reqwest=warn,rustls=warn,webrtc-sctp=warn,webrtc=warn"));
         }
         #[cfg(not(debug_assertions))]
         {
@@ -377,7 +389,7 @@ pub fn init_log(_is_async: bool, _name: &str) -> Option<flexi_logger::LoggerHand
                 path.push(_name);
             }
             use flexi_logger::*;
-            if let Ok(x) = Logger::try_with_env_or_str("debug") {
+            if let Ok(x) = Logger::try_with_env_or_str("debug,reqwest=warn,rustls=warn,webrtc-sctp=warn,webrtc=warn") {
                 logger_holder = x
                     .log_to_file(FileSpec::default().directory(path))
                     .write_mode(if _is_async {
@@ -442,6 +454,20 @@ pub fn version_check_request(typ: String) -> (VersionCheckRequest, String) {
         },
         URL.to_string(),
     )
+}
+
+pub fn time_based_rand() -> u32 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+
+    let mut x = nanos as u64;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+
+    (x % 32768) as u32
 }
 
 #[cfg(test)]
